@@ -1,0 +1,417 @@
+# =========================
+# checks.yaml
+# =========================
+default_timeout_sec: 20
+
+profiles:
+  cp_ftpas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: goto_ftpas_sbin
+        display_command: cd flp_ftp/sbin/
+        prompt_dir: "~"
+        display_only: true
+
+      - name: cp_ftpas_status
+        display_command: sh ftj.sh status
+        prompt_dir: sbin
+        command: cd flp_ftp/sbin && sh ftj.sh status
+        timeout: 20
+        expect_stdout_contains:
+          - is RUNNING
+
+      - name: cp_ftpas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: sbin
+        command: cd flp_ftp/sbin && vmstat 1 10
+        timeout: 20
+
+  cp_fcpas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: cp_fcpas_napserver_process
+        display_command: ps ux | grep napServer
+        prompt_dir: "~"
+        command: ps ux | grep napServer
+        timeout: 15
+        expect_stdout_contains:
+          - napServer
+
+      - name: cp_fcpas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: "~"
+        command: vmstat 1 10
+        timeout: 20
+
+  cp_fchas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: goto_fch_etc
+        display_command: cd flp_fch/etc/
+        prompt_dir: "~"
+        display_only: true
+
+      - name: source_setenv
+        display_command: . setenv
+        prompt_dir: etc
+        display_only: true
+
+      - name: cp_fchas_cmadmin_psr_bbs
+        display_command: |
+          cmadmin
+          >psr
+          >bbs
+          ^C
+        prompt_dir: etc
+        pty: false
+        command: |
+          cd flp_fch/etc || exit 1
+          . ./setenv || exit 1
+
+          PY_BIN=""
+          if command -v python3 >/dev/null 2>&1; then
+            PY_BIN="python3"
+          elif command -v python >/dev/null 2>&1; then
+            PY_BIN="python"
+          else
+            echo "ERROR: python/python3 is not installed"
+            exit 1
+          fi
+
+          "$PY_BIN" <<'PY'
+          import os
+          import pty
+          import re
+          import select
+          import signal
+          import subprocess
+          import sys
+          import time
+
+          master, slave = pty.openpty()
+          proc = subprocess.Popen(
+              ["cmadmin"],
+              stdin=slave,
+              stdout=slave,
+              stderr=slave,
+              close_fds=True,
+          )
+          os.close(slave)
+
+          def read_until(pattern, timeout):
+              buf = ""
+              end_at = time.time() + timeout
+              rx = re.compile(pattern, re.S)
+
+              while time.time() < end_at:
+                  rlist, _, _ = select.select([master], [], [], 0.2)
+                  if master in rlist:
+                      try:
+                          data = os.read(master, 4096)
+                      except OSError:
+                          return False
+
+                      if not data:
+                          return False
+
+                      try:
+                          text = data.decode("utf-8", "ignore")
+                      except AttributeError:
+                          text = data
+
+                      sys.stdout.write(text)
+                      sys.stdout.flush()
+                      buf += text
+
+                      if rx.search(buf):
+                          return True
+
+              return False
+
+          try:
+              if not read_until(r">", 10):
+                  print("ERROR: cmadmin prompt timeout")
+                  try:
+                      proc.kill()
+                  except Exception:
+                      pass
+                  sys.exit(1)
+
+              os.write(master, b"psr\n")
+              if not read_until(r">", 10):
+                  print("ERROR: psr response timeout")
+                  try:
+                      proc.kill()
+                  except Exception:
+                      pass
+                  sys.exit(1)
+
+              os.write(master, b"bbs\n")
+              if not read_until(r"currSvrNum", 10):
+                  print("ERROR: bbs output timeout")
+                  try:
+                      proc.kill()
+                  except Exception:
+                      pass
+                  sys.exit(1)
+
+              os.write(master, b"\x03")
+              time.sleep(0.5)
+
+              try:
+                  proc.send_signal(signal.SIGINT)
+              except Exception:
+                  pass
+
+              end_at = time.time() + 2
+              while time.time() < end_at:
+                  rlist, _, _ = select.select([master], [], [], 0.2)
+                  if master in rlist:
+                      try:
+                          data = os.read(master, 4096)
+                      except OSError:
+                          break
+                      if not data:
+                          break
+                      try:
+                          text = data.decode("utf-8", "ignore")
+                      except AttributeError:
+                          text = data
+                      sys.stdout.write(text)
+                      sys.stdout.flush()
+
+              try:
+                  proc.terminate()
+                  proc.wait()
+              except Exception:
+                  try:
+                      proc.kill()
+                  except Exception:
+                      pass
+
+              sys.exit(0)
+
+          finally:
+              try:
+                  os.close(master)
+              except Exception:
+                  pass
+          PY
+        timeout: 25
+        expect_stdout_contains:
+          - Copyright 2013-2017 UnionPay.
+          - All Rights Reserved.
+          - Svr Name
+          - currSvrNum
+
+      - name: cp_fchas_syncthing_process
+        display_command: ps -ef | grep '[s]yncthing'
+        prompt_dir: etc
+        command: ps -ef | grep '[s]yncthing'
+        timeout: 15
+        expect_stdout_contains:
+          - syncthing
+
+  cp_fbias_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: goto_fbi_sbin
+        display_command: cd flp_fbi/sbin/
+        prompt_dir: "~"
+        display_only: true
+
+      - name: cp_fbias_status
+        display_command: sh fbi.sh status
+        prompt_dir: sbin
+        command: cd flp_fbi/sbin && sh fbi.sh status
+        timeout: 20
+        expect_stdout_contains:
+          - is RUNNING
+
+      - name: cp_fbias_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: sbin
+        command: cd flp_fbi/sbin && vmstat 1 10
+        timeout: 20
+
+  cp_fmpas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: goto_fmp_sbin
+        display_command: cd flp_fmp/sbin/
+        prompt_dir: "~"
+        display_only: true
+
+      - name: cp_fmpas_status
+        display_command: sh fmp.sh status
+        prompt_dir: sbin
+        command: cd flp_fmp/sbin && sh fmp.sh status
+        timeout: 20
+        expect_stdout_contains:
+          - is RUNNING
+
+      - name: cp_fmpas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: sbin
+        command: cd flp_fmp/sbin && vmstat 1 10
+        timeout: 20
+
+  cp_fmsas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: goto_fms_scripts
+        display_command: cd flp_fms/scripts/
+        prompt_dir: "~"
+        display_only: true
+
+      - name: cp_fmsas_checkump
+        display_command: sh checkump.sh
+        prompt_dir: scripts
+        command: cd flp_fms/scripts && sh checkump.sh
+        timeout: 30
+
+      - name: cp_fmsas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: scripts
+        command: cd flp_fms/scripts && vmstat 1 10
+        timeout: 20
+
+  cp_bisas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: cp_bisas_risk_ai_count
+        display_command: ps -ef | grep $USER | grep risk_ai | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep risk_ai | grep -v grep | wc -l
+        timeout: 15
+
+      - name: cp_bisas_scs_ai_count
+        display_command: ps -ef | grep $USER | grep scs_ai | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep scs_ai | grep -v grep | wc -l
+        timeout: 15
+
+      - name: cp_bisas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: "~"
+        command: vmstat 1 10
+        timeout: 20
+
+  cp_mopas_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: cp_mopas_mop_server_count
+        display_command: ps -ef | grep $USER | grep mop_server | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep mop_server | grep -v grep | wc -l
+        timeout: 15
+
+      - name: cp_mopas_mop_email_count
+        display_command: ps -ef | grep $USER | grep mop_email | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep mop_email | grep -v grep | wc -l
+        timeout: 15
+
+      - name: cp_mopas_mop_transfer_count
+        display_command: ps -ef | grep $USER | grep mop_transfer | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep mop_transfer | grep -v grep | wc -l
+        timeout: 15
+
+      - name: cp_mopas_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: "~"
+        command: vmstat 1 10
+        timeout: 20
+
+  cp_nginx_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: cp_nginx_master_count
+        display_command: ps -ef | grep $USER | grep master | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep master | grep -v grep | wc -l
+        timeout: 15
+        expect_stdout_int_gte: 1
+
+      - name: cp_nginx_work_count
+        display_command: ps -ef | grep $USER | grep work | grep -v grep | wc -l
+        prompt_dir: "~"
+        command: ps -ef | grep $USER | grep work | grep -v grep | wc -l
+        timeout: 15
+        expect_stdout_int_gte: 1
+
+      - name: cp_nginx_vmstat
+        display_command: vmstat 1 10
+        prompt_dir: "~"
+        command: vmstat 1 10
+        timeout: 20
+
+  probe_user_profile:
+    checks:
+      - name: show_date
+        display_command: date
+        prompt_dir: "~"
+        command: date
+        timeout: 10
+
+      - name: probe_process
+        display_command: ps -ef | grep ./probe | grep -v grep
+        prompt_dir: "~"
+        command: ps -ef | grep ./probe | grep -v grep
+        timeout: 15
+        expect_stdout_contains:
+          - ./probe
+
+      - name: probe_df
+        display_command: df
+        prompt_dir: "~"
+        command: df
+        timeout: 20
+        expect_stdout_contains:
+          - Filesystem

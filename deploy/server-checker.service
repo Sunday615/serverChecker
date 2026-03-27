@@ -1,0 +1,7 @@
+[Unit]
+Description=Server Checker Job
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/youruser/server-checker
+ExecStart=/home/youruser/server-checker/.venv/bin/python /home/youruser/server-checker/src/main.py

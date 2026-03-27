@@ -1,0 +1,34 @@
+.
+├── configs
+│   ├── checks.yaml
+│   └── hosts.yaml
+├── deploy
+│   ├── server-checker.service
+│   └── server-checker.timer
+├── newst.txt
+├── output
+├── requirements.txt
+├── run.py
+├── scripts
+│   ├── bootstrap.sh
+│   └── run_once.sh
+├── src
+│   ├── __pycache__
+│   │   ├── check_executor.cpython-313.pyc
+│   │   ├── main.cpython-313.pyc
+│   │   ├── report_builder.cpython-313.pyc
+│   │   ├── screenshot.cpython-313.pyc
+│   │   ├── ssh_runner.cpython-313.pyc
+│   │   ├── utils.cpython-313.pyc
+│   │   └── web_executor.cpython-313.pyc
+│   ├── check_executor.py
+│   ├── main.py
+│   ├── report_builder.py
+│   ├── screenshot.py
+│   ├── ssh_runner.py
+│   ├── utils.py
+│   └── web_executor.py
+└── templates
+    └── report.html.j2
+
+8 directories, 24 files
