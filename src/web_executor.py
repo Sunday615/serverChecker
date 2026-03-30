@@ -309,7 +309,7 @@ def execute_web_check(
         "message": "",
         "generated_at": captured_at,
         "captured_at": captured_at,
-        "screenshot_file": str(screenshot_file),
+        "screenshot_file": "",
         "final_url": "",
     }
 
@@ -397,6 +397,7 @@ def execute_web_check(
                 path=str(screenshot_file),
                 full_page=full_page,
             )
+            result["screenshot_file"] = str(screenshot_file)
             result["final_url"] = page.url
             result["status"] = "PASS"
             result["message"] = (
