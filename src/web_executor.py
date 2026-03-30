@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -57,14 +58,50 @@ def _as_int(value: Any, default: int) -> int:
         return default
 
 
-def _resolve_secret(item: dict[str, Any], value_key: str, env_key: str) -> str:
+def _env_key_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9]+", "_", str(value).strip().upper())
+    return token.strip("_")
+
+
+def _default_secret_env_names(target_name: str, site_name: str, secret_name: str) -> list[str]:
+    candidates: list[str] = []
+    target_token = _env_key_token(target_name)
+    site_token = _env_key_token(site_name)
+
+    for candidate in (
+        f"{target_token}_{secret_name}" if target_token else "",
+        f"{site_token}_{target_token}_{secret_name}" if site_token and target_token else "",
+        f"WEB_{target_token}_{secret_name}" if target_token else "",
+    ):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    return candidates
+
+
+def _resolve_secret(
+    item: dict[str, Any],
+    value_key: str,
+    env_key: str,
+    *,
+    secret_name: str,
+    target_name: str,
+    site_name: str,
+) -> str:
     direct_value = str(item.get(value_key, "") or "").strip()
     if direct_value:
         return direct_value
 
     env_name = str(item.get(env_key, "") or "").strip()
     if env_name:
-        return str(os.getenv(env_name, "")).strip()
+        env_value = str(os.getenv(env_name, "")).strip()
+        if env_value:
+            return env_value
+
+    for candidate in _default_secret_env_names(target_name, site_name, secret_name):
+        env_value = str(os.getenv(candidate, "")).strip()
+        if env_value:
+            return env_value
 
     return ""
 
@@ -108,6 +145,18 @@ def _is_still_login_form(page, username_selector: str, password_selector: str) -
         return False
 
 
+def _page_has_login_form(page, web_item: dict[str, Any], timeout_ms: int) -> bool:
+    username_selectors = _normalize_selectors(web_item.get("username_selector"), DEFAULT_USERNAME_SELECTORS)
+    password_selectors = _normalize_selectors(web_item.get("password_selector"), DEFAULT_PASSWORD_SELECTORS)
+
+    try:
+        _wait_for_visible(page, username_selectors, timeout_ms)
+        _wait_for_visible(page, password_selectors, timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
 def _wait_after_navigation(
     page,
     web_item: dict[str, Any],
@@ -145,10 +194,14 @@ def _wait_after_navigation(
         page.wait_for_timeout(pre_screenshot_wait_ms)
 
 
-def _perform_login(page, web_item: dict[str, Any], timeout_ms: int) -> tuple[str, str, str]:
-    username = _resolve_secret(web_item, "username", "username_env")
-    password = _resolve_secret(web_item, "password", "password_env")
-
+def _perform_login(
+    page,
+    web_item: dict[str, Any],
+    timeout_ms: int,
+    *,
+    username: str,
+    password: str,
+) -> tuple[str, str, str]:
     if not username or not password:
         raise RuntimeError("Login is required but username/password is missing.")
 
@@ -213,6 +266,23 @@ def execute_web_check(
     target_name = str(web_item.get("name") or "web").strip() or "web"
     target_url = str(web_item.get("url") or "").strip()
     login_required = _as_bool(web_item.get("login_required"), False)
+    username = _resolve_secret(
+        web_item,
+        "username",
+        "username_env",
+        secret_name="USERNAME",
+        target_name=target_name,
+        site_name=site_name,
+    )
+    password = _resolve_secret(
+        web_item,
+        "password",
+        "password_env",
+        secret_name="PASSWORD",
+        target_name=target_name,
+        site_name=site_name,
+    )
+    has_credentials = bool(username and password)
 
     timeout_ms = _as_int(web_item.get("timeout_ms"), DEFAULT_TIMEOUT_MS)
     viewport_width = _as_int(web_item.get("viewport_width"), DEFAULT_VIEWPORT_WIDTH)
@@ -276,11 +346,24 @@ def execute_web_check(
                 apply_capture_delay=not login_required,
             )
 
+            login_form_detected = _page_has_login_form(
+                page=page,
+                web_item=web_item,
+                timeout_ms=min(timeout_ms, 900),
+            )
             used_username_selector = ""
             used_password_selector = ""
+            auto_login_used = False
 
-            if login_required:
-                used_username_selector, used_password_selector, _ = _perform_login(page, web_item, timeout_ms)
+            if login_required or (login_form_detected and has_credentials):
+                auto_login_used = not login_required and login_form_detected and has_credentials
+                used_username_selector, used_password_selector, _ = _perform_login(
+                    page,
+                    web_item,
+                    timeout_ms,
+                    username=username,
+                    password=password,
+                )
 
                 post_login_url = str(web_item.get("post_login_url") or "").strip()
                 if post_login_url:
@@ -298,6 +381,15 @@ def execute_web_check(
 
                 if reuse_storage_state:
                     context.storage_state(path=str(storage_state_file))
+            elif login_form_detected:
+                result["message"] = (
+                    "Page appears to require login. Set login_required: true and provide "
+                    "username/password, username_env/password_env, or "
+                    "<TARGET_NAME>_USERNAME/<TARGET_NAME>_PASSWORD in .env."
+                )
+                context.close()
+                browser.close()
+                return result
 
             _inject_capture_overlay(page, captured_at)
             page.wait_for_timeout(200)
@@ -307,7 +399,11 @@ def execute_web_check(
             )
             result["final_url"] = page.url
             result["status"] = "PASS"
-            result["message"] = "Screenshot captured successfully."
+            result["message"] = (
+                "Screenshot captured successfully after auto-login."
+                if auto_login_used
+                else "Screenshot captured successfully."
+            )
 
             context.close()
             browser.close()

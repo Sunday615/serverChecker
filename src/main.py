@@ -11,7 +11,7 @@ from src.report_builder import (
 )
 from src.screenshot import capture_html_screenshot
 from src.db_store import database_config_error, persist_run_result
-from src.utils import ensure_dir, load_yaml, now_display, now_timestamp, slugify
+from src.utils import ensure_dir, load_env_file, load_yaml, now_display, now_timestamp, slugify
 from src.web_executor import execute_web_check
 
 
@@ -35,6 +35,7 @@ def _group_hosts_by_site(run_result: dict) -> dict[str, dict]:
 
 def main() -> int:
     base_dir = Path(__file__).resolve().parent.parent
+    load_env_file(base_dir / ".env")
 
     configs_dir = base_dir / "configs"
     output_dir = base_dir / "output"
