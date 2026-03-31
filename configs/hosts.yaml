@@ -400,3 +400,21 @@ hosts:
           username: "probe_user"
           password: "probe_user"
         check_profile: "probe_user_profile"
+
+web_targets:
+  - name: "website_main_domain"
+    site: "WEB"
+    url: "https://www.lapnet.com.la/#/r/Lw"
+    login_required: false
+    success_wait_selector: "body"
+    timeout_ms: 4000
+    pre_screenshot_wait_ms: 3000
+    full_page: false
+
+  - name: "hfs"
+    site: "WEB"
+    url: "http://175.3.1.8/"
+    login_required: false
+    success_wait_selector: "body"
+    timeout_ms: 4000
+    pre_screenshot_wait_ms: 3000
